@@ -1,4 +1,5 @@
 """Configuration options for Online Lab services. """
+import os
 
 options = [
     ('port', 'int'),
@@ -38,7 +39,7 @@ defaults = {
     'provider': 'Unknown service provider',
     'description': '',
     'environ': {},
-    'setuid': True,
+    'setuid': True if os.getuid() == 0 else False,
     'uid_min': 10000,
     'uid_max': 50000,
     'engine_timeout': 20,              # wait at most 20 seconds

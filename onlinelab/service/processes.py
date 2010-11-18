@@ -16,8 +16,14 @@ import collections
 from StringIO import StringIO
 
 import psutil
-import pyinotify
-
+try:
+    import pyinotify
+    INOTIFY_AVAILABLE = True
+except ImportError:
+    pyinotfy = None
+    INOTIFY_AVAILABLE = False
+    logging.info("No inotify support")
+    
 import tornado.ioloop
 
 from tornado.httpclient import AsyncHTTPClient, HTTPRequest
@@ -35,9 +41,10 @@ class ProcessManager(object):
 
     _re = re.compile("^.*?port=(?P<port>\d+), pid=(?P<pid>\d+)")
 
-    _inotify_mask = pyinotify.IN_CREATE \
-                  | pyinotify.IN_MODIFY \
-                  | pyinotify.IN_DELETE
+    if INOTIFY_AVAILABLE:
+        _inotify_mask = pyinotify.IN_CREATE \
+                      | pyinotify.IN_MODIFY \
+                      | pyinotify.IN_DELETE
 
     def __init__(self):
         self.ioloop = tornado.ioloop.IOLoop.instance()
@@ -45,16 +52,17 @@ class ProcessManager(object):
 
         self.processes = {}
 
-        self.watches = pyinotify.WatchManager()
-        self.notifier = pyinotify.Notifier(self.watches, timeout=0)
+        if INOTIFY_AVAILABLE:
+            self.watches = pyinotify.WatchManager()
+            self.notifier = pyinotify.Notifier(self.watches, timeout=0)
 
-        self.ioloop.add_handler(self.watches.get_fd(),
-            self._on_inotify, self.ioloop.READ)
+            self.ioloop.add_handler(self.watches.get_fd(),
+                self._on_inotify, self.ioloop.READ)
 
-        mask = self._inotify_mask
+            mask = self._inotify_mask
 
-        self.watches.add_watch(self.settings.data_path, mask,
-            self._process_events, rec=True, auto_add=True)
+            self.watches.add_watch(self.settings.data_path, mask,
+                self._process_events, rec=True, auto_add=True)
 
         self.uid_map = [False]*self.settings.uid_max
 
@@ -203,6 +211,7 @@ class ProcessManager(object):
 
         if not self.settings.setuid:
             uid, gid = None, None
+            logging.info('Not attempting to change user id')
         else:
             uid, gid = self.alloc_uid_gid()
 
@@ -306,7 +315,10 @@ class ProcessManager(object):
                 # clean up (remove process entry marker and kill the
                 # process) and gracefully fail.
 
-                logging.error("Newly created process didn't respond properly")
+                logging.error("Newly created process didn't respond properly, stderr:")
+                logging.error(proc.stderr.read())
+                logging.info("Settings were:" + str(self.settings))
+                
                 self.cleanup(uuid, cwd, uid, gid)
 
                 proc.kill()
